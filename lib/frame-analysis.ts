@@ -5,15 +5,23 @@ export type FrameStats = {
   sharpness: number;
   /** 前フレームとの平均差分（大きいほど動いている） */
   motion: number;
+  /** 明るい画素（紙）の割合 0–1 */
+  paperRatio: number;
 };
 
 export const DETECTION = {
   minBrightness: 60,
-  maxBrightness: 235,
+  maxBrightness: 245,
   minSharpness: 20,
-  maxMotion: 30,
-  /** 連続で条件を満たしたフレーム数 */
-  stableFrames: 6,
+  maxMotion: 12,
+  /** 枠内に占める紙（明るい画素）の最低割合 */
+  minPaperRatio: 0.3,
+  /** 紙とみなす輝度 */
+  paperLevel: 160,
+  /** 連続で条件を満たしたフレーム数（100ms 間隔で約 1.5 秒） */
+  stableFrames: 15,
+  /** カメラ起動直後は判定しない時間 */
+  warmupMs: 1000,
 } as const;
 
 export function analyzeFrame(
@@ -24,10 +32,12 @@ export function analyzeFrame(
   const gray = new Uint8ClampedArray(width * height);
 
   let brightnessSum = 0;
+  let paperCount = 0;
   for (let i = 0, p = 0; i < gray.length; i++, p += 4) {
     const value = (data[p] * 299 + data[p + 1] * 587 + data[p + 2] * 114) / 1000;
     gray[i] = value;
     brightnessSum += value;
+    if (value >= DETECTION.paperLevel) paperCount++;
   }
 
   let laplacianSum = 0;
@@ -53,15 +63,17 @@ export function analyzeFrame(
       brightness: brightnessSum / gray.length,
       sharpness: laplacianCount ? laplacianSum / laplacianCount : 0,
       motion,
+      paperRatio: paperCount / gray.length,
     },
     gray,
   };
 }
 
-export type FrameVerdict = "ok" | "dark" | "bright" | "blurry" | "moving";
+export type FrameVerdict = "ok" | "dark" | "bright" | "blurry" | "moving" | "noReceipt";
 
 export function judgeFrame(stats: FrameStats): FrameVerdict {
   if (stats.brightness < DETECTION.minBrightness) return "dark";
+  if (stats.paperRatio < DETECTION.minPaperRatio) return "noReceipt";
   if (stats.brightness > DETECTION.maxBrightness) return "bright";
   if (stats.motion > DETECTION.maxMotion) return "moving";
   if (stats.sharpness < DETECTION.minSharpness) return "blurry";

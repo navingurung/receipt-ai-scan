@@ -39,7 +39,7 @@ export function ScanPreview({ imageUrl, status, startedAt, errorMessage, onRetry
         )}
         {status === "done" && (
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-paper/40">
-            <span className="stamp-in rounded-md border-4 border-shu px-5 py-2 text-3xl font-bold tracking-widest text-shu">
+            <span className="stamp-in rounded-md border-4 border-brand bg-paper/80 px-5 py-2 text-3xl font-bold tracking-widest text-brand">
               読取済
             </span>
           </div>
@@ -49,7 +49,7 @@ export function ScanPreview({ imageUrl, status, startedAt, errorMessage, onRetry
       <div role="status" aria-live="polite" className="flex min-h-12 flex-col items-center gap-3 text-center">
         {status === "analyzing" && (
           <p className="text-base font-medium">
-            AI で読み取り中
+            レシートを読み取っています…
             <span className="ml-3 tabular-nums text-muted">{(elapsed / 1000).toFixed(1)} 秒</span>
           </p>
         )}
@@ -61,7 +61,7 @@ export function ScanPreview({ imageUrl, status, startedAt, errorMessage, onRetry
                 <button
                   type="button"
                   onClick={onRetry}
-                  className="rounded-lg bg-ink px-5 py-2.5 text-sm font-semibold text-paper focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink"
+                  className="h-12 rounded-xl bg-brand px-6 text-base font-semibold text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
                 >
                   もう一度読み取る
                 </button>
@@ -70,7 +70,7 @@ export function ScanPreview({ imageUrl, status, startedAt, errorMessage, onRetry
                 <button
                   type="button"
                   onClick={onRescan}
-                  className="rounded-lg border border-line bg-paper px-5 py-2.5 text-sm font-semibold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink"
+                  className="h-12 rounded-xl border border-line bg-paper px-6 text-base font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
                 >
                   撮り直す
                 </button>

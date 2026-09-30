@@ -11,11 +11,11 @@ type ReceiptScannerProps = {
 
 const ANALYSIS_WIDTH = 160;
 const ANALYSIS_INTERVAL_MS = 100;
-const MANUAL_HINT_DELAY_MS = 3000;
 const LOW_RESOLUTION = 1080;
 
 const HINTS: Record<FrameVerdict | "waiting", string> = {
-  waiting: "レシートを枠に合わせてください",
+  waiting: "レシート全体を枠に合わせてください",
+  noReceipt: "レシート全体を枠に合わせてください",
   dark: "暗すぎます。明るい場所で撮影してください",
   bright: "反射しています。角度を少し変えてください",
   moving: "そのまま動かさないでください",
@@ -34,7 +34,6 @@ export function ReceiptScanner({ onCapture, onClose }: ReceiptScannerProps) {
   const [error, setError] = useState<string | null>(null);
   const [verdict, setVerdict] = useState<FrameVerdict | "waiting">("waiting");
   const [progress, setProgress] = useState(0);
-  const [showManualHint, setShowManualHint] = useState(false);
   const [lowResolution, setLowResolution] = useState(false);
 
   const stopStream = useCallback(() => {
@@ -51,8 +50,9 @@ export function ReceiptScanner({ onCapture, onClose }: ReceiptScannerProps) {
         const stream = await navigator.mediaDevices.getUserMedia({
           video: {
             facingMode: { ideal: "environment" },
-            width: { ideal: 1920 },
-            height: { ideal: 1080 },
+            // 縦長のレシートを切り出しても文字が潰れないよう高解像度を要求
+            width: { ideal: 3840 },
+            height: { ideal: 2160 },
           },
           audio: false,
         });
@@ -108,7 +108,7 @@ export function ReceiptScanner({ onCapture, onClose }: ReceiptScannerProps) {
     }
   }, [onCapture, stopStream]);
 
-  // フレーム解析による自動撮影
+  // フレーム解析による自動撮影（レシートが枠内で約 1.5 秒静止したら撮影）
   useEffect(() => {
     if (!ready) return;
     const video = videoRef.current;
@@ -119,6 +119,7 @@ export function ReceiptScanner({ onCapture, onClose }: ReceiptScannerProps) {
     const context = canvas.getContext("2d", { willReadFrequently: true });
     if (!context) return;
 
+    const startedAt = performance.now();
     let previous: Uint8ClampedArray | null = null;
     let stable = 0;
 
@@ -131,19 +132,16 @@ export function ReceiptScanner({ onCapture, onClose }: ReceiptScannerProps) {
 
       const { stats, gray } = analyzeFrame(context.getImageData(0, 0, canvas.width, canvas.height), previous);
       previous = gray;
-      const current = judgeFrame(stats);
+      if (performance.now() - startedAt < DETECTION.warmupMs) return;
 
+      const current = judgeFrame(stats);
       stable = current === "ok" ? stable + 1 : 0;
       setVerdict(current === "ok" && stable < DETECTION.stableFrames ? "moving" : current);
       setProgress(Math.min(1, stable / DETECTION.stableFrames));
       if (stable >= DETECTION.stableFrames) void capture();
     }, ANALYSIS_INTERVAL_MS);
 
-    const hintTimer = window.setTimeout(() => setShowManualHint(true), MANUAL_HINT_DELAY_MS);
-    return () => {
-      window.clearInterval(timer);
-      window.clearTimeout(hintTimer);
-    };
+    return () => window.clearInterval(timer);
   }, [ready, capture]);
 
   const handleClose = () => {
@@ -152,67 +150,75 @@ export function ReceiptScanner({ onCapture, onClose }: ReceiptScannerProps) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 overflow-hidden bg-black text-white">
-      <video ref={videoRef} playsInline muted className="absolute inset-0 h-full w-full object-cover" />
-
-      {/* ガイド枠：外側を暗くしてレシートを枠いっぱいに合わせてもらう */}
-      <div className="absolute inset-0 flex items-center justify-center px-6 pt-[max(4.5rem,env(safe-area-inset-top))] pb-[max(9rem,env(safe-area-inset-bottom))]">
-        <div
-          ref={frameRef}
-          className="relative aspect-[5/8] h-full max-h-[78dvh] max-w-full rounded-lg"
-          style={{ boxShadow: "0 0 0 100vmax rgb(0 0 0 / 0.58)" }}
-        >
-          {(["left-0 top-0 border-l-4 border-t-4 rounded-tl-lg", "right-0 top-0 border-r-4 border-t-4 rounded-tr-lg", "left-0 bottom-0 border-l-4 border-b-4 rounded-bl-lg", "right-0 bottom-0 border-r-4 border-b-4 rounded-br-lg"] as const).map(
-            (corner) => (
-              <span
-                key={corner}
-                className={`absolute h-10 w-10 transition-colors duration-200 ${corner} ${
-                  progress > 0 ? "border-shu" : "border-white"
-                }`}
-              />
-            ),
-          )}
-          {ready && <div className="scan-line" />}
-          <div
-            className="absolute inset-x-6 bottom-4 h-1 overflow-hidden rounded-full bg-white/25"
-            aria-hidden="true"
-          >
-            <div className="h-full bg-shu transition-[width] duration-100" style={{ width: `${progress * 100}%` }} />
-          </div>
-        </div>
-      </div>
-
-      <div className="absolute inset-x-0 top-0 flex items-center justify-between px-4 pt-[max(1rem,env(safe-area-inset-top))]">
+    <div className="fixed inset-0 z-50 flex flex-col overflow-hidden bg-black text-white">
+      <div className="flex items-center justify-end px-4 pt-[max(1rem,env(safe-area-inset-top))] pb-3">
         <button
           type="button"
           onClick={handleClose}
-          className="rounded-full bg-black/50 px-4 py-2 text-sm font-medium backdrop-blur focus-visible:outline-2 focus-visible:outline-white"
+          aria-label="閉じる"
+          className="flex h-12 w-12 items-center justify-center rounded-full bg-white/20 text-2xl backdrop-blur focus-visible:outline-2 focus-visible:outline-white"
         >
-          閉じる
+          ✕
         </button>
+      </div>
+
+      <div className="relative min-h-0 flex-1">
+        <video ref={videoRef} playsInline muted className="absolute inset-0 h-full w-full object-cover" />
+
+        <div className="absolute inset-0 flex items-center justify-center p-6">
+          <div
+            ref={frameRef}
+            className="relative aspect-[5/8] h-full max-h-full max-w-full rounded-md"
+            style={{ boxShadow: "0 0 0 100vmax rgb(0 0 0 / 0.5)" }}
+          >
+            {/* 3×3 グリッド */}
+            <div className="pointer-events-none absolute inset-0" aria-hidden="true">
+              <span className="absolute inset-y-0 left-1/3 w-px bg-white/45" />
+              <span className="absolute inset-y-0 left-2/3 w-px bg-white/45" />
+              <span className="absolute inset-x-0 top-1/3 h-px bg-white/45" />
+              <span className="absolute inset-x-0 top-2/3 h-px bg-white/45" />
+            </div>
+            {(
+              [
+                "left-0 top-0 border-l-4 border-t-4 rounded-tl-md",
+                "right-0 top-0 border-r-4 border-t-4 rounded-tr-md",
+                "left-0 bottom-0 border-l-4 border-b-4 rounded-bl-md",
+                "right-0 bottom-0 border-r-4 border-b-4 rounded-br-md",
+              ] as const
+            ).map((corner) => (
+              <span
+                key={corner}
+                className={`absolute h-10 w-10 transition-colors duration-200 ${corner} ${
+                  progress > 0 ? "border-scan" : "border-white"
+                }`}
+              />
+            ))}
+            <div className="absolute inset-x-6 bottom-4 h-1.5 overflow-hidden rounded-full bg-white/25" aria-hidden="true">
+              <div className="h-full bg-scan transition-[width] duration-100" style={{ width: `${progress * 100}%` }} />
+            </div>
+          </div>
+        </div>
+
         {lowResolution && (
-          <p className="rounded-full bg-black/50 px-3 py-1.5 text-xs backdrop-blur">
+          <p className="absolute top-3 left-1/2 -translate-x-1/2 rounded-full bg-black/60 px-3 py-1.5 text-xs whitespace-nowrap">
             カメラの解像度が低いため、精度が下がる場合があります
           </p>
         )}
       </div>
 
-      <div className="absolute inset-x-0 bottom-0 flex flex-col items-center gap-4 px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
-        <p role="status" className="rounded-full bg-black/55 px-4 py-2 text-sm font-medium backdrop-blur">
+      <div className="flex flex-col items-center gap-4 px-4 pt-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
+        <p role="status" className="text-sm font-medium">
           {error ?? (ready ? HINTS[verdict] : "カメラを起動しています…")}
         </p>
-        <div className="flex flex-col items-center gap-1.5">
-          <button
-            type="button"
-            onClick={() => void capture()}
-            disabled={!ready}
-            aria-label="撮影する"
-            className={`h-18 w-18 rounded-full border-4 border-white bg-white/20 transition active:scale-95 disabled:opacity-40 ${
-              showManualHint ? "pulse-ring" : ""
-            }`}
-          />
-          {showManualHint && <span className="text-xs text-white/80">自動で撮影されない場合はタップ</span>}
-        </div>
+        <button
+          type="button"
+          onClick={() => void capture()}
+          disabled={!ready}
+          aria-label="撮影する"
+          className="flex h-20 w-20 items-center justify-center rounded-full border-4 border-white transition active:scale-95 disabled:opacity-40"
+        >
+          <span className="h-15 w-15 rounded-full bg-white" />
+        </button>
       </div>
     </div>
   );

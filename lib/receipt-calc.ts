@@ -1,66 +1,127 @@
 import type { Receipt, TaxRate } from "@/lib/receipt-schema";
 
-export type RateSummary = {
+export type RateRow = {
   rate: TaxRate;
-  /** 税抜 */
-  base: number;
-  /** 消費税 */
+  /** 値引按分後の対象額（内税は税込、外税は税抜） */
+  amount: number;
+  /** 税額（レシート記載を優先） */
   tax: number;
-  /** 税込 */
-  gross: number;
+  taxSource: "printed" | "calculated";
 };
 
+export type IssueLevel = "error" | "warning" | "info";
+export type Issue = { level: IssueLevel; message: string };
+
 export type ReceiptSummary = {
-  rates: RateSummary[];
-  computedTotal: number;
-  warnings: string[];
+  linesTotal: number;
+  rates: RateRow[];
+  taxTotal: number;
+  /** 合計（レシート記載を優先） */
+  total: number;
+  issues: Issue[];
+  /** error がある場合は次へ進めない */
+  blocked: boolean;
 };
 
 const RATES: TaxRate[] = [8, 10];
-/** 端数処理の差を許容する円数（税率ごと） */
-const TOLERANCE_PER_RATE = 1;
 
-const yen = (value: number) => `¥${value.toLocaleString("ja-JP")}`;
+export const yen = (value: number | null) => (value === null ? "—" : `¥${value.toLocaleString("ja-JP")}`);
 
-/**
- * 内税: 記載金額 = 税込。税額は割り戻しで計算（切り捨て）。
- * 外税: 記載金額 = 税抜。税額を上乗せ（切り捨て）。
- * 内税の金額を税抜として扱わないこと（二重課税の計算ミスになる）。
- */
-export function summarizeReceipt(receipt: Receipt): ReceiptSummary {
-  const rates = RATES.flatMap((rate) => {
-    const amount = receipt.items.filter((item) => item.r === rate).reduce((sum, item) => sum + item.p, 0);
-    if (amount === 0 && !receipt.items.some((item) => item.r === rate)) return [];
-
-    if (receipt.inc) {
-      const tax = Math.floor((amount * rate) / (100 + rate));
-      return [{ rate, base: amount - tax, tax, gross: amount }];
-    }
-    const tax = Math.floor((amount * rate) / 100);
-    return [{ rate, base: amount, tax, gross: amount + tax }];
-  });
-
-  const computedTotal = rates.reduce((sum, row) => sum + row.gross, 0);
-  const warnings: string[] = [];
-
-  if (receipt.items.length === 0) warnings.push("商品が読み取れませんでした。");
-  if (!receipt.no) warnings.push("レシート番号が読み取れませんでした。");
-  if (!receipt.date) warnings.push("日付が読み取れませんでした。");
-
-  if (receipt.total === null) {
-    warnings.push("合計金額が読み取れませんでした。");
-  } else if (Math.abs(receipt.total - computedTotal) > TOLERANCE_PER_RATE * Math.max(1, rates.length)) {
-    warnings.push(`合計が一致しません（計算 ${yen(computedTotal)} / レシート ${yen(receipt.total)}）。`);
-  }
-
-  for (const row of rates) {
-    const printed = row.rate === 8 ? receipt.tax8 : receipt.tax10;
-    if (printed !== null && Math.abs(printed - row.tax) > TOLERANCE_PER_RATE) {
-      warnings.push(`${row.rate}% の税額が一致しません（計算 ${yen(row.tax)} / レシート ${yen(printed)}）。`);
-    }
-  }
-
-  return { rates, computedTotal, warnings };
+// 端数処理は店舗ごとに異なるため、切り捨て・四捨五入・切り上げのいずれかと一致すれば正しいとみなす
+function possibleTaxes(amount: number, rate: TaxRate, inclusive: boolean): number[] {
+  const raw = inclusive ? (amount * rate) / (100 + rate) : (amount * rate) / 100;
+  return [...new Set([Math.floor(raw), Math.round(raw), Math.ceil(raw)])];
 }
 
-export { yen };
+// 小計値引を税率ごとの金額比で按分（端数は金額の大きい税率に寄せる）
+function allocateDiscount(amounts: Map<TaxRate, number>, discount: number): Map<TaxRate, number> {
+  const sum = [...amounts.values()].reduce((a, b) => a + b, 0);
+  if (discount <= 0 || sum <= 0) return amounts;
+
+  const entries = [...amounts.entries()].sort(([, a], [, b]) => b - a);
+  let remaining = Math.min(discount, sum);
+  const result = new Map<TaxRate, number>();
+  entries.forEach(([rate, amount], index) => {
+    const share = index === entries.length - 1 ? remaining : Math.floor((discount * amount) / sum);
+    remaining -= share;
+    result.set(rate, amount - share);
+  });
+  return result;
+}
+
+export function summarizeReceipt(receipt: Receipt): ReceiptSummary {
+  const issues: Issue[] = [];
+  const inclusive = receipt.inc !== false;
+
+  if (receipt.inc === null) {
+    issues.push({ level: "error", message: "内税・外税を判定できませんでした。税区分を選択してください。" });
+  }
+  if (receipt.items.length === 0) issues.push({ level: "error", message: "商品がありません。" });
+  if (!receipt.no) issues.push({ level: "error", message: "レシート番号を入力してください。" });
+
+  const linesTotal = receipt.items.reduce((sum, item) => sum + item.p, 0);
+  const byRate = new Map<TaxRate, number>();
+  for (const item of receipt.items) byRate.set(item.r, (byRate.get(item.r) ?? 0) + item.p);
+  const discounted = allocateDiscount(byRate, receipt.sd);
+
+  const rates: RateRow[] = RATES.filter((rate) => discounted.has(rate)).map((rate) => {
+    const amount = discounted.get(rate) ?? 0;
+    const printed = rate === 8 ? receipt.tax8 : receipt.tax10;
+    const candidates = possibleTaxes(amount, rate, inclusive);
+
+    if (printed === null) {
+      issues.push({ level: "warning", message: `${rate}% の税額が読み取れなかったため、計算値を表示しています。` });
+      return { rate, amount, tax: candidates[0], taxSource: "calculated" };
+    }
+    if (!candidates.includes(printed)) {
+      issues.push({
+        level: "error",
+        message: `${rate}% の税額が一致しません（レシート ${yen(printed)} / 計算 ${yen(candidates[0])}）。金額を確認してください。`,
+      });
+    }
+    return { rate, amount, tax: printed, taxSource: "printed" };
+  });
+
+  const taxTotal = rates.reduce((sum, row) => sum + row.tax, 0);
+  const base = rates.reduce((sum, row) => sum + row.amount, 0);
+  const expectedTotal = inclusive ? base : base + taxTotal;
+
+  if (receipt.total === null) {
+    issues.push({ level: "warning", message: "合計金額が読み取れなかったため、計算値を表示しています。" });
+  } else if (receipt.total !== expectedTotal) {
+    const diff = Math.abs(receipt.total - expectedTotal);
+    issues.push(
+      diff <= rates.length
+        ? { level: "info", message: `合計に ${yen(diff)} の端数差があります。レシート記載の金額を使用します。` }
+        : {
+            level: "error",
+            message: `合計が一致しません（レシート ${yen(receipt.total)} / 明細から計算 ${yen(expectedTotal)}）。`,
+          },
+    );
+  }
+
+  if (receipt.cnt !== null) {
+    const quantity = receipt.items.reduce((sum, item) => sum + item.q, 0);
+    if (quantity !== receipt.cnt) {
+      issues.push({ level: "warning", message: `点数が一致しません（レシート ${receipt.cnt} 点 / 明細 ${quantity} 点）。` });
+    }
+  }
+
+  receipt.items.forEach((item, index) => {
+    if (item.u !== null && item.u * item.q !== item.p) {
+      issues.push({
+        level: "warning",
+        message: `${index + 1} 行目：単価 × 数量と金額が一致しません（値引きの可能性があります）。`,
+      });
+    }
+  });
+
+  return {
+    linesTotal,
+    rates,
+    taxTotal,
+    total: receipt.total ?? expectedTotal,
+    issues,
+    blocked: issues.some((issue) => issue.level === "error"),
+  };
+}

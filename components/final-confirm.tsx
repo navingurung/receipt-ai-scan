@@ -1,89 +1,99 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, type ReactNode } from "react";
 import { summarizeReceipt, yen } from "@/lib/receipt-calc";
 import type { Receipt } from "@/lib/receipt-schema";
 
 type FinalConfirmProps = {
   receipt: Receipt;
   onBack: () => void;
-  onConfirm: () => void;
+  onSubmit: () => void;
 };
 
-function formatDate(value: string | null) {
-  if (!value) return "—";
-  const date = new Date(value);
-  return Number.isNaN(date.getTime())
-    ? value
-    : date.toLocaleString("ja-JP", { dateStyle: "medium", timeStyle: "short" });
+function Row({ label, value, strong = false }: { label: string; value: ReactNode; strong?: boolean }) {
+  return (
+    <div className={`flex items-baseline justify-between gap-4 ${strong ? "text-xl font-bold" : "text-base"}`}>
+      <span className={strong ? "" : "text-muted"}>{label}</span>
+      <span className="tabular-nums">{value}</span>
+    </div>
+  );
 }
 
-export function FinalConfirm({ receipt, onBack, onConfirm }: FinalConfirmProps) {
+export function FinalConfirm({ receipt, onBack, onSubmit }: FinalConfirmProps) {
   const summary = useMemo(() => summarizeReceipt(receipt), [receipt]);
+  const taxLabel = receipt.inc ? "税込" : "税抜";
 
   return (
-    <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-5 px-4 py-6">
-      <div className="rounded-xl border border-line bg-paper">
-        <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-2 border-b border-line p-5 text-sm">
-          <dt className="text-muted">店舗名</dt>
-          <dd className="font-medium">{receipt.store ?? "—"}</dd>
-          <dt className="text-muted">日時</dt>
-          <dd className="font-medium">{formatDate(receipt.date)}</dd>
-          <dt className="text-muted">レシート番号</dt>
-          <dd className="font-medium tabular-nums">{receipt.no ?? "—"}</dd>
-          <dt className="text-muted">税の表示</dt>
-          <dd className="font-medium">{receipt.inc ? "内税" : "外税"}</dd>
-        </dl>
+    <>
+      <div className="flex flex-1 justify-center px-4 py-5 md:px-8 md:py-7">
+        <article className="w-full max-w-2xl rounded-2xl border border-line bg-paper px-6 py-7 md:px-10">
+          <header className="flex flex-col items-center gap-1 text-center">
+            <h2 className="text-xl font-bold">{receipt.store ?? "店舗名なし"}</h2>
+            {receipt.date && <p className="text-muted tabular-nums">{receipt.date.replace("T", " ")}</p>}
+            <p className="text-muted tabular-nums">レシート番号 {receipt.no ?? "—"}</p>
+            {receipt.tno && <p className="text-xs text-muted tabular-nums">登録番号 {receipt.tno}</p>}
+          </header>
 
-        <ul className="divide-y divide-line">
-          {receipt.items.map((item, index) => (
-            <li key={index} className="flex items-baseline gap-3 px-5 py-2.5 text-sm">
-              <span className="min-w-0 flex-1 truncate">{item.n || "（名称なし）"}</span>
-              <span className="text-muted tabular-nums">×{item.q}</span>
-              <span className="w-10 text-right text-xs text-muted">{item.r}%</span>
-              <span className={`w-24 text-right tabular-nums ${item.p < 0 ? "text-shu" : ""}`}>{yen(item.p)}</span>
-            </li>
-          ))}
-        </ul>
+          <hr className="my-6 border-dashed border-line" />
 
-        <div className="border-t border-line p-5 text-sm tabular-nums">
-          {summary.rates.map((row) => (
-            <div key={row.rate} className="flex justify-between py-0.5 text-muted">
-              <span>
-                {row.rate}% 対象 {yen(row.gross)}
-              </span>
-              <span>消費税 {yen(row.tax)}</span>
+          <ol className="flex flex-col gap-6">
+            {receipt.items.map((item, index) => (
+              <li key={index} className="flex flex-col gap-1.5">
+                <p className="text-lg font-bold">
+                  No.{index + 1} {item.n || "（商品名なし）"}
+                </p>
+                <Row label="税率" value={`${item.r}%`} />
+                <Row label="JANコード" value={item.jan ?? "—"} />
+                <Row label="数量" value={item.q} />
+                <Row label={`販売単価（${taxLabel}）`} value={yen(item.u)} />
+                <Row label="小計" value={yen(item.p)} />
+              </li>
+            ))}
+          </ol>
+
+          <hr className="my-6 border-dashed border-line" />
+
+          <div className="flex flex-col gap-1.5">
+            <Row label={`明細合計（${taxLabel}）`} value={yen(summary.linesTotal)} />
+            {receipt.sd > 0 && <Row label="小計値引" value={`−${yen(receipt.sd)}`} />}
+            <Row label={receipt.inc ? "内消費税" : "消費税"} value={yen(summary.taxTotal)} />
+            <div className="mt-2">
+              <Row label="合計（税込）" value={yen(summary.total)} strong />
             </div>
-          ))}
-          <div className="mt-3 flex items-baseline justify-between">
-            <span className="font-medium">合計</span>
-            <span className="text-3xl font-bold">{yen(receipt.total ?? summary.computedTotal)}</span>
           </div>
+
+          <hr className="my-6 border-dashed border-line" />
+
+          <section className="flex flex-col gap-1.5">
+            <h3 className="mb-1 text-base font-bold">税率別内訳</h3>
+            {summary.rates.map((row) => (
+              <div key={row.rate} className="flex flex-col gap-1.5">
+                <Row label={`${row.rate}%対象（${taxLabel}）`} value={yen(row.amount)} />
+                <Row label="消費税額" value={yen(row.tax)} />
+              </div>
+            ))}
+          </section>
+        </article>
+      </div>
+
+      <footer className="sticky bottom-0 z-10 border-t border-line bg-paper/95 px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur md:px-8">
+        <div className="grid grid-cols-2 gap-3">
+          <button
+            type="button"
+            onClick={onBack}
+            className="h-14 rounded-xl border border-line bg-paper text-base font-medium focus-visible:outline-2 focus-visible:outline-brand"
+          >
+            戻る
+          </button>
+          <button
+            type="button"
+            onClick={onSubmit}
+            className="h-14 rounded-xl bg-brand text-base font-semibold text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
+          >
+            送信
+          </button>
         </div>
-      </div>
-
-      {summary.warnings.length > 0 && (
-        <p className="rounded-lg bg-shu-soft px-4 py-3 text-sm text-shu">
-          未確認の注意事項が {summary.warnings.length} 件あります。前の画面で確認してください。
-        </p>
-      )}
-
-      <div className="flex gap-3">
-        <button
-          type="button"
-          onClick={onBack}
-          className="rounded-lg border border-line bg-paper px-5 py-3 text-sm font-semibold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink"
-        >
-          修正する
-        </button>
-        <button
-          type="button"
-          onClick={onConfirm}
-          className="flex-1 rounded-lg bg-shu px-5 py-3 text-sm font-semibold text-paper focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-shu"
-        >
-          この内容で確定する
-        </button>
-      </div>
-    </div>
+      </footer>
+    </>
   );
 }

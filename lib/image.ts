@@ -1,5 +1,5 @@
 /** 送信前の長辺の上限（アップロード時間と画像トークンを抑える） */
-export const MAX_EDGE = 1536;
+export const MAX_EDGE = 2048;
 const JPEG_QUALITY = 0.85;
 
 const PASSTHROUGH_TYPES = new Set(["image/heic", "image/heif"]);
@@ -45,7 +45,7 @@ function guessType(file: Blob): string {
 }
 
 /**
- * どの形式の画像でも JPEG（長辺 1536px 以下）に変換する。
+ * どの形式の画像でも JPEG（長辺 2048px 以下）に変換する。
  * ブラウザでデコードできない HEIC/HEIF はそのまま送る（Gemini 側で対応）。
  */
 export async function prepareImage(source: Blob): Promise<Blob> {
