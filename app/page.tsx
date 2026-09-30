@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ActionTileContent, actionTileClassName } from "@/components/action-tile";
 import { FinalConfirm } from "@/components/final-confirm";
-import { AddItemIcon, PosIcon, ScanIcon, UploadIcon } from "@/components/icons";
+import { AddItemIcon, PosIcon, ScanIcon, TrashIcon, UploadIcon } from "@/components/icons";
 import { ReceiptReview } from "@/components/receipt-review";
 import { ReceiptScanner } from "@/components/receipt-scanner";
 import { ReceiptUpload } from "@/components/receipt-upload";
@@ -11,7 +11,7 @@ import { ScanPreview } from "@/components/scan-preview";
 import { StepHeader } from "@/components/step-header";
 import { clearDraft, loadDraft, saveDraft, type Draft } from "@/lib/draft-storage";
 import { prepareImage } from "@/lib/image";
-import { summarizeReceipt, yen } from "@/lib/receipt-calc";
+import { reconcileDiscount, summarizeReceipt, yen } from "@/lib/receipt-calc";
 import { createEmptyReceipt, normalizeReceipt, type Receipt } from "@/lib/receipt-schema";
 
 type Phase = "start" | "camera" | "analyzing" | "review" | "confirm" | "done";
@@ -81,7 +81,7 @@ export default function Home() {
         throw new Error(typeof body.error === "string" ? body.error : `読み取りに失敗しました（${response.status}）`);
       }
 
-      setReceipt(normalizeReceipt(body.receipt));
+      setReceipt(reconcileDiscount(normalizeReceipt(body.receipt)));
       setTiming({
         totalMs: Math.round(performance.now() - t0),
         aiMs: typeof body.aiMs === "number" ? body.aiMs : 0,
@@ -155,6 +155,12 @@ export default function Home() {
     setPhase("review");
   };
 
+  const discardDraft = () => {
+    if (!window.confirm("一時保存したデータを削除しますか？")) return;
+    clearDraft();
+    setDraft(null);
+  };
+
   const submit = () => {
     clearDraft();
     setDraft(null);
@@ -176,8 +182,36 @@ export default function Home() {
       {header}
       <main className="flex flex-1 flex-col">
         {(phase === "start" || phase === "camera") && (
-          <div className="flex flex-1 flex-col gap-6 px-4 py-6 md:justify-center md:px-10 md:py-10">
-            <p className="text-base text-muted md:text-center md:text-lg">操作を選択してください</p>
+          <div className="flex flex-1 flex-col gap-6 px-4 py-6 md:px-10 md:py-8">
+                        <div className="flex items-center justify-between gap-3">
+              <p className="text-base text-muted md:text-lg">操作を選択してください</p>
+              {draft && (
+                <div className="flex items-center rounded-full border border-line bg-paper pl-1">
+                  <button
+                    type="button"
+                    onClick={resumeDraft}
+                    className="h-11 px-3 text-sm font-medium text-brand"
+                  >
+                    一時保存を再開（
+                    {new Date(draft.savedAt).toLocaleString("ja-JP", {
+                      month: "numeric",
+                      day: "numeric",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
+                    ）
+                  </button>
+                  <button
+                    type="button"
+                    onClick={discardDraft}
+                    aria-label="一時保存を削除"
+                    className="flex h-11 w-11 items-center justify-center rounded-full text-shu hover:bg-shu-soft"
+                  >
+                    <TrashIcon className="h-5 w-5" />
+                  </button>
+                </div>
+              )}
+            </div>
 
             <div className="grid gap-3 md:grid-cols-2 md:gap-6">
               <button
@@ -225,28 +259,11 @@ export default function Home() {
               <p role="alert" className="rounded-xl bg-brand-soft px-4 py-3 text-sm font-medium text-brand md:text-center">
                 {notice}
               </p>
-            )}
-
-            {draft && (
-              <button
-                type="button"
-                onClick={resumeDraft}
-                className="self-center text-base font-medium text-brand underline underline-offset-4"
-              >
-                一時保存を再開（
-                {new Date(draft.savedAt).toLocaleString("ja-JP", {
-                  month: "numeric",
-                  day: "numeric",
-                  hour: "2-digit",
-                  minute: "2-digit",
-                })}
-                ）
-              </button>
-            )}
+            )}         
 
             <p className="text-center text-xs text-muted">
               テスト（無料枠）中はサンプルやスタッフのレシートのみ使用してください。
-            </p>
+            </p>    
           </div>
         )}
 

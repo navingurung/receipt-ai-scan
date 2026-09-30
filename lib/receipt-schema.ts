@@ -84,7 +84,8 @@ Items:
 
 Receipt:
 - inc: true if prices include tax (内税, 税込, "内" next to amounts, (内消費税等)), false if tax is added below the subtotal (外税, 税抜, 小計(税抜)), null if unclear.
-- sd: a discount applied to the whole subtotal (小計値引, 小計割引) as a positive number, else 0.
+- sd: only a discount applied to the whole subtotal (小計値引, 小計割引) that is NOT already subtracted from an item, as a positive number, else 0.
+- Summary lines such as 値引合計, 商品代金, or "税率8%対象 -24" repeat item discounts. Never add them to sd.
 - tax8 / tax10: the printed tax amount for each rate (消費税等, 内税, 内消費税), not the taxable base.
 - total: the amount charged (合計, お買上げ金額). Ignore お預かり, お釣り, and payment lines.
 - no: the receipt number (伝票番号, レシートNo, 取引No, No.). Ignore barcode numbers and long # numbers.

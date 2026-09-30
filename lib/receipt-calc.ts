@@ -108,11 +108,11 @@ export function summarizeReceipt(receipt: Receipt): ReceiptSummary {
   }
 
   receipt.items.forEach((item, index) => {
-    if (item.u !== null && item.u * item.q !== item.p) {
-      issues.push({
-        level: "warning",
-        message: `${index + 1} 行目：単価 × 数量と金額が一致しません（値引きの可能性があります）。`,
-      });
+    if (item.u === null) return;
+    const gross = item.u * item.q;
+    // 金額が単価×数量より小さいのは明細値引きなので正常。大きい場合のみ警告
+    if (item.p > gross) {
+      issues.push({ level: "warning", message: `${index + 1} 行目：金額が単価 × 数量を超えています。` });
     }
   });
 
@@ -124,4 +124,16 @@ export function summarizeReceipt(receipt: Receipt): ReceiptSummary {
     issues,
     blocked: issues.some((issue) => issue.level === "error"),
   };
+}
+
+/**
+ * AI が明細値引きを小計値引にも重複計上した場合の補正。
+ * 小計値引を 0 にするとレシート記載の合計と一致する場合のみ 0 に戻す。
+ */
+export function reconcileDiscount(receipt: Receipt): Receipt {
+  if (receipt.sd === 0 || receipt.total === null) return receipt;
+  const withoutDiscount = summarizeReceipt({ ...receipt, sd: 0 });
+  const withDiscount = summarizeReceipt(receipt);
+  const matches = (summary: ReceiptSummary) => !summary.issues.some((issue) => issue.message.startsWith("合計が一致しません"));
+  return matches(withoutDiscount) && !matches(withDiscount) ? { ...receipt, sd: 0 } : receipt;
 }
