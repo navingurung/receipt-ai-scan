@@ -1,7 +1,7 @@
 import { RECEIPT_JSON_SCHEMA, RECEIPT_PROMPT, normalizeReceipt, type Receipt } from "@/lib/receipt-schema";
 
 const ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/interactions";
-const DEFAULT_MODEL = "gemini-3.1-flash";
+const DEFAULT_MODEL = "gemini-3.6-flash";
 const TIMEOUT_MS = 20_000;
 
 export class GeminiError extends Error {
