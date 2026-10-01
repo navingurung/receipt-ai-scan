@@ -80,7 +80,7 @@ export async function extractReceipt(image: { base64: string; mimeType: string }
         mime_type: "application/json",
         schema: RECEIPT_JSON_SCHEMA,
       },
-      generation_config: { thinking_level: "minimal" },
+      generation_config: { thinking_level: "low" },
       // レシート画像を Google 側に保存しない
       store: false,
     }),
