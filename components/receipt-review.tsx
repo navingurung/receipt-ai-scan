@@ -321,6 +321,12 @@ function ItemCard({ item, taxLabel, disabled, onEdit, onRemove }: ItemCardProps)
         <dd className="tabular-nums">{item.jan ?? "—"}</dd>
         <dt className="text-muted">販売単価{taxLabel && `（${taxLabel}）`}</dt>
         <dd className="tabular-nums">{yen(item.u)}</dd>
+        {item.d > 0 && (
+          <>
+            <dt className="text-muted">値引額</dt>
+            <dd className="text-shu tabular-nums">−{yen(item.d)}</dd>
+          </>
+        )}
       </dl>
 
       <div className="mt-auto flex items-baseline justify-between border-t border-line pt-3">
@@ -344,11 +350,11 @@ type ItemEditorProps = {
 function ItemEditor({ item, taxLabel, onSave, onCancel }: ItemEditorProps) {
   const [draft, setDraft] = useState(item);
 
-  // 単価か数量を変えたら金額を再計算（金額は直接修正も可能）
-  const setPricing = (patch: Partial<Pick<ReceiptItem, "u" | "q">>) =>
+  // 単価・数量・値引額を変えたら金額を再計算（金額は直接修正も可能）
+  const setPricing = (patch: Partial<Pick<ReceiptItem, "u" | "q" | "d">>) =>
     setDraft((current) => {
       const next = { ...current, ...patch };
-      return next.u !== null ? { ...next, p: next.u * next.q } : next;
+      return next.u !== null ? { ...next, p: next.u * next.q - next.d } : next;
     });
 
   return (
@@ -398,7 +404,17 @@ function ItemEditor({ item, taxLabel, onSave, onCancel }: ItemEditorProps) {
         </label>
       </div>
       <label className={labelClass}>
-        金額{taxLabel && `（${taxLabel}）`}
+        値引額
+        <input
+          inputMode="numeric"
+          className={`${inputClass} tabular-nums`}
+          value={draft.d || ""}
+          placeholder="0"
+          onChange={(event) => setPricing({ d: Math.max(0, toNumber(event.target.value) ?? 0) })}
+        />
+      </label>
+      <label className={labelClass}>
+        金額（値引後{taxLabel && `・${taxLabel}`}）
         <input
           inputMode="numeric"
           className={`${inputClass} tabular-nums`}

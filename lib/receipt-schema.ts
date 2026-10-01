@@ -9,7 +9,9 @@ export type ReceiptItem = {
   q: number;
   /** 販売単価（レシート記載どおり。印字がなければ null） */
   u: number | null;
-  /** 金額（数量分・明細値引き後、レシート記載どおり） */
+  /** 値引額（この商品への値引き。正の数、なければ 0） */
+  d: number;
+  /** 金額（数量分・値引き後） */
   p: number;
   /** 税率 */
   r: TaxRate;
@@ -57,10 +59,11 @@ export const RECEIPT_JSON_SCHEMA = {
           jan: { ...nullableString, description: "8 or 13 digit product code printed with the item" },
           q: { type: "integer", description: "Quantity" },
           u: { ...nullableInteger, description: "Unit price as printed" },
-          p: { type: "integer", description: "Line amount in yen after this item's own discounts" },
+          d: { type: "integer", description: "Discount applied to this item as a positive number, 0 if none" },
+          p: { type: "integer", description: "Line amount in yen after this item's discount" },
           r: { type: "integer", enum: [8, 10], description: "Tax rate for this line" },
         },
-        required: ["n", "jan", "q", "u", "p", "r"],
+        required: ["n", "jan", "q", "u", "d", "p", "r"],
       },
     },
     sd: { type: "integer", description: "Discount applied to the subtotal as a positive number, 0 if none" },
@@ -79,13 +82,15 @@ Items:
 - One entry per purchased product, in printed order.
 - n: product name. jan: the 8 or 13 digit code printed next to or above the product, else null.
 - q: quantity (e.g. "6個", "×3"), default 1. u: the printed unit price (e.g. "単1,799", "@150"), else null.
-- p: the printed line amount. If a discount line (値引, 割引, クーポン) directly follows a product, subtract it from that product's p and do not create a separate item.
+- d: if a discount line (値引, 値引額, 割引, クーポン) directly follows a product, put that discount in d as a positive number (e.g. "-24" → 24) and do not create a separate item. Otherwise 0.
+- p: the line amount after the discount (printed amount − d).
 - r: 8 for reduced-rate items (marked ※, ＊, *, 軽, or as the receipt's legend says), otherwise 10.
 
 Receipt:
-- inc: true if prices include tax (内税, 税込, "内" next to amounts, (内消費税等)), false if tax is added below the subtotal (外税, 税抜, 小計(税抜)), null if unclear.
+- inc: false if the subtotal is printed as tax-excluded (小計(税抜), 外税, 税抜) with tax added below it. This wins even if (内消費税等) is also printed near the total.
+  true only if item prices include tax (内税, 税込, "内" next to item amounts) and no tax-excluded subtotal is printed. null if unclear.
 - sd: only a discount applied to the whole subtotal (小計値引, 小計割引) that is NOT already subtracted from an item, as a positive number, else 0.
-- Summary lines such as 値引合計, 商品代金, or "税率8%対象 -24" repeat item discounts. Never add them to sd.
+  Summary lines such as 値引合計, 商品代金, or "税率8%対象 -24" repeat item discounts. Never add them to sd.
 - tax8 / tax10: the printed tax amount for each rate (消費税等, 内税, 内消費税), not the taxable base.
 - total: the amount charged (合計, お買上げ金額). Ignore お預かり, お釣り, and payment lines.
 - no: the receipt number (伝票番号, レシートNo, 取引No, No.). Ignore barcode numbers and long # numbers.
@@ -112,7 +117,7 @@ function toJan(value: unknown): string | null {
 }
 
 export function createEmptyItem(rate: TaxRate = 10): ReceiptItem {
-  return { n: "", jan: null, q: 1, u: null, p: 0, r: rate };
+  return { n: "", jan: null, q: 1, u: null, d: 0, p: 0, r: rate };
 }
 
 export function createEmptyReceipt(): Receipt {
@@ -147,6 +152,7 @@ export function normalizeReceipt(raw: unknown): Receipt {
         jan: toJan(item.jan),
         q: Math.max(1, toInt(item.q) ?? 1),
         u: toInt(item.u),
+        d: Math.max(0, toInt(item.d) ?? 0),
         p,
         r: toInt(item.r) === 8 ? 8 : 10,
       },

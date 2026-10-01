@@ -14,6 +14,8 @@ export type Issue = { level: IssueLevel; message: string };
 
 export type ReceiptSummary = {
   linesTotal: number;
+  /** 商品ごとの値引額の合計 */
+  itemDiscountTotal: number;
   rates: RateRow[];
   taxTotal: number;
   /** 合計（レシート記載を優先） */
@@ -109,15 +111,25 @@ export function summarizeReceipt(receipt: Receipt): ReceiptSummary {
 
   receipt.items.forEach((item, index) => {
     if (item.u === null) return;
-    const gross = item.u * item.q;
-    // 金額が単価×数量より小さいのは明細値引きなので正常。大きい場合のみ警告
-    if (item.p > gross) {
-      issues.push({ level: "warning", message: `${index + 1} 行目：金額が単価 × 数量を超えています。` });
+    if (item.u * item.q - item.d !== item.p) {
+      issues.push({
+        level: "warning",
+        message: `${index + 1} 行目：単価 × 数量 − 値引額と金額が一致しません。`,
+      });
     }
   });
 
+  // 読み間違い（例：2026 → 2028）を検出するため、未来日付を警告
+  if (receipt.date) {
+    const purchasedAt = new Date(receipt.date);
+    if (!Number.isNaN(purchasedAt.getTime()) && purchasedAt.getTime() > Date.now() + 24 * 60 * 60 * 1000) {
+      issues.push({ level: "warning", message: "日付が未来になっています。レシートの日付を確認してください。" });
+    }
+  }
+
   return {
     linesTotal,
+    itemDiscountTotal: receipt.items.reduce((sum, item) => sum + item.d, 0),
     rates,
     taxTotal,
     total: receipt.total ?? expectedTotal,

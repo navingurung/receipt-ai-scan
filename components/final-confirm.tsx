@@ -46,6 +46,7 @@ export function FinalConfirm({ receipt, onBack, onSubmit }: FinalConfirmProps) {
                 <Row label="JANコード" value={item.jan ?? "—"} />
                 <Row label="数量" value={item.q} />
                 <Row label={`販売単価（${taxLabel}）`} value={yen(item.u)} />
+                {item.d > 0 && <Row label="値引額" value={<span className="text-shu">−{yen(item.d)}</span>} />}
                 <Row label="小計" value={yen(item.p)} />
               </li>
             ))}
@@ -54,7 +55,10 @@ export function FinalConfirm({ receipt, onBack, onSubmit }: FinalConfirmProps) {
           <hr className="my-6 border-dashed border-line" />
 
           <div className="flex flex-col gap-1.5">
-            <Row label={`明細合計（${taxLabel}）`} value={yen(summary.linesTotal)} />
+            {summary.itemDiscountTotal > 0 && (
+              <Row label="値引合計" value={<span className="text-shu">−{yen(summary.itemDiscountTotal)}</span>} />
+            )}
+            <Row label={`明細合計（${taxLabel}・値引後）`} value={yen(summary.linesTotal)} />
             {receipt.sd > 0 && <Row label="小計値引" value={`−${yen(receipt.sd)}`} />}
             <Row label={receipt.inc ? "内消費税" : "消費税"} value={yen(summary.taxTotal)} />
             <div className="mt-2">
