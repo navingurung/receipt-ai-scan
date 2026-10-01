@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { PencilIcon, CloseIcon, PlusIcon, RetakeIcon, ScanIcon } from "@/components/icons";
 import { summarizeReceipt, yen, type Issue } from "@/lib/receipt-calc";
-import { createEmptyItem, type Receipt, type ReceiptItem, type TaxRate } from "@/lib/receipt-schema";
+import { createEmptyItem, type Receipt, type ReceiptFee, type ReceiptItem, type TaxRate } from "@/lib/receipt-schema";
 
 type Timing = { totalMs: number; aiMs: number; model: string };
 
@@ -161,16 +161,6 @@ export function ReceiptReview({
           />
         </label>
 
-        <div className="flex items-center justify-between rounded-xl border border-line bg-paper px-5 py-4">
-          <div className="flex flex-col gap-0.5">
-            <span className="text-sm text-muted">合計金額（レシート記載）</span>
-            <span className="text-xs text-muted">
-              {receipt.inc ? "内消費税" : "消費税"} {yen(summary.taxTotal)}
-            </span>
-          </div>
-          <span className="text-3xl font-bold tabular-nums">{yen(summary.total)}</span>
-        </div>
-
         <label className={labelClass}>
           小計値引額
           <input
@@ -182,6 +172,9 @@ export function ReceiptReview({
           />
           <span className="text-xs font-normal text-muted">入力した値引額は税率ごとの金額に按分されます</span>
         </label>
+
+        {/* 商品以外の料金：ある場合のみ表示（免税対象外だが合計には含まれる） */}
+        {receipt.fees.length > 0 && <FeeList fees={receipt.fees} />}
 
         <section className="flex flex-col gap-3">
           <h2 className="text-base font-bold">追加された商品（{receipt.items.length}）</h2>
@@ -233,6 +226,8 @@ export function ReceiptReview({
             </ul>
           )}
         </section>
+
+        {receipt.items.length > 0 && <TotalsCard netTotal={summary.netTotal} taxTotal={summary.taxTotal} total={summary.total} />}
 
         {timing && (
           <details className="text-sm text-muted">
@@ -431,5 +426,42 @@ function ItemEditor({ item, taxLabel, onSave, onCancel }: ItemEditorProps) {
         </button>
       </div>
     </li>
+  );
+}
+
+export function FeeList({ fees }: { fees: ReceiptFee[] }) {
+  return (
+    <section className="rounded-2xl border border-line bg-paper px-5 py-4">
+      <h2 className="text-sm font-bold">その他の料金（免税対象外）</h2>
+      <ul className="mt-2 flex flex-col gap-1.5 text-sm">
+        {fees.map((fee, index) => (
+          <li key={index} className="flex items-baseline justify-between gap-4">
+            <span className="text-muted">
+              {fee.n}
+              {fee.q > 1 && ` ×${fee.q}`}
+              <span className="ml-2 text-xs">
+                {fee.r}%・{fee.inc ? "税込" : "税抜"}
+              </span>
+            </span>
+            <span className="tabular-nums">{yen(fee.p)}</span>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+export function TotalsCard({ netTotal, taxTotal, total }: { netTotal: number; taxTotal: number; total: number }) {
+  return (
+    <dl className="grid grid-cols-[1fr_auto] gap-x-6 gap-y-2 rounded-2xl border border-line bg-paper px-5 py-4 text-base">
+      <dt className="text-muted">合計金額（税抜）</dt>
+      <dd className="text-right tabular-nums">{yen(netTotal)}</dd>
+      <dt className="text-muted">消費税</dt>
+      <dd className="text-right tabular-nums">{yen(taxTotal)}</dd>
+      <div className="col-span-2 flex items-baseline justify-between border-t border-line pt-2">
+        <dt className="font-bold">支払合計</dt>
+        <dd className="text-2xl font-bold tabular-nums">{yen(total)}</dd>
+      </div>
+    </dl>
   );
 }

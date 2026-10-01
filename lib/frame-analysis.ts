@@ -7,22 +7,56 @@ export type FrameStats = {
   motion: number;
   /** 明るい画素（紙）の割合 0–1 */
   paperRatio: number;
+  /** 紙の範囲（枠に対する比率 0–1） */
+  paperBox: { top: number; bottom: number; left: number; right: number } | null;
 };
 
 export const DETECTION = {
   minBrightness: 60,
   maxBrightness: 245,
-  minSharpness: 20,
-  maxMotion: 12,
-  /** 枠内に占める紙（明るい画素）の最低割合 */
-  minPaperRatio: 0.3,
+  /** 手ブレを考慮して緩めに設定 */
+  minSharpness: 14,
+  maxMotion: 25,
   /** 紙とみなす輝度 */
   paperLevel: 160,
-  /** 連続で条件を満たしたフレーム数（100ms 間隔で約 1.5 秒） */
-  stableFrames: 15,
+  /** 行・列の何割が紙なら「紙の行・列」とみなすか */
+  paperLineRatio: 0.15,
+  /** 枠に対して紙が占めるべき最小の高さ・幅 */
+  minFillHeight: 0.6,
+  minFillWidth: 0.35,
+  /** 中心からのずれの許容値（枠に対する比率） */
+  maxCenterOffset: 0.18,
+  /** 枠の端から何割以内を「端に接している」とみなすか */
+  edgeMargin: 0.02,
+  /** 枠に合った状態が続いたら撮影するフレーム数（100ms 間隔で約 0.7 秒） */
+  stableFrames: 7,
   /** カメラ起動直後は判定しない時間 */
-  warmupMs: 1000,
+  warmupMs: 800,
 } as const;
+
+function findPaperBox(gray: Uint8ClampedArray, width: number, height: number): FrameStats["paperBox"] {
+  const rowHits = new Uint32Array(height);
+  const colHits = new Uint32Array(width);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      if (gray[y * width + x] >= DETECTION.paperLevel) {
+        rowHits[y]++;
+        colHits[x]++;
+      }
+    }
+  }
+
+  const rows = [...rowHits.keys()].filter((y) => rowHits[y] >= width * DETECTION.paperLineRatio);
+  const cols = [...colHits.keys()].filter((x) => colHits[x] >= height * DETECTION.paperLineRatio);
+  if (rows.length === 0 || cols.length === 0) return null;
+
+  return {
+    top: rows[0] / height,
+    bottom: (rows[rows.length - 1] + 1) / height,
+    left: cols[0] / width,
+    right: (cols[cols.length - 1] + 1) / width,
+  };
+}
 
 export function analyzeFrame(
   image: ImageData,
@@ -64,20 +98,58 @@ export function analyzeFrame(
       sharpness: laplacianCount ? laplacianSum / laplacianCount : 0,
       motion,
       paperRatio: paperCount / gray.length,
+      paperBox: findPaperBox(gray, width, height),
     },
     gray,
   };
 }
 
-export type FrameVerdict = "ok" | "dark" | "bright" | "blurry" | "moving" | "noReceipt";
+export type FrameVerdict =
+  | "ok"
+  | "noReceipt"
+  | "tooFar"
+  | "tooClose"
+  | "offCenter"
+  | "dark"
+  | "bright"
+  | "blurry"
+  | "moving";
 
-export function judgeFrame(stats: FrameStats): FrameVerdict {
-  if (stats.brightness < DETECTION.minBrightness) return "dark";
-  if (stats.paperRatio < DETECTION.minPaperRatio) return "noReceipt";
-  if (stats.brightness > DETECTION.maxBrightness) return "bright";
-  if (stats.motion > DETECTION.maxMotion) return "moving";
-  if (stats.sharpness < DETECTION.minSharpness) return "blurry";
-  return "ok";
+/** 枠合わせの状態（ガイド枠の色に使用） */
+export type FitLevel = "none" | "near" | "fit";
+
+export function judgeFrame(stats: FrameStats): { verdict: FrameVerdict; fit: FitLevel } {
+  if (stats.brightness < DETECTION.minBrightness) return { verdict: "dark", fit: "none" };
+
+  const box = stats.paperBox;
+  if (!box) return { verdict: "noReceipt", fit: "none" };
+
+  const fillHeight = box.bottom - box.top;
+  const fillWidth = box.right - box.left;
+  const m = DETECTION.edgeMargin;
+  const touches = [box.top <= m, box.bottom >= 1 - m, box.left <= m, box.right >= 1 - m].filter(Boolean).length;
+  const offsetX = Math.abs((box.left + box.right) / 2 - 0.5);
+  const offsetY = Math.abs((box.top + box.bottom) / 2 - 0.5);
+
+  // 3 辺以上が枠に接している＝はみ出している可能性が高い
+  if (touches >= 3 && stats.paperRatio > 0.85) return { verdict: "tooClose", fit: "near" };
+  if (fillHeight < DETECTION.minFillHeight && fillWidth < DETECTION.minFillWidth * 1.6) {
+    return { verdict: "tooFar", fit: "near" };
+  }
+  if (offsetX > DETECTION.maxCenterOffset || offsetY > DETECTION.maxCenterOffset) {
+    return { verdict: "offCenter", fit: "near" };
+  }
+
+  // 枠には合っている。あとは撮影できる状態か
+  if (stats.brightness > DETECTION.maxBrightness) return { verdict: "bright", fit: "fit" };
+  if (stats.motion > DETECTION.maxMotion) return { verdict: "moving", fit: "fit" };
+  if (stats.sharpness < DETECTION.minSharpness) return { verdict: "blurry", fit: "fit" };
+  return { verdict: "ok", fit: "fit" };
+}
+
+/** 撮影候補のシャープさを比較するための簡易計測 */
+export function measureSharpness(image: ImageData): number {
+  return analyzeFrame(image, null).stats.sharpness;
 }
 
 /**

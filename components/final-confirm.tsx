@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, type ReactNode } from "react";
+import { FeeList, TotalsCard } from "@/components/receipt-review";
 import { summarizeReceipt, yen } from "@/lib/receipt-calc";
 import type { Receipt } from "@/lib/receipt-schema";
 
@@ -54,17 +55,17 @@ export function FinalConfirm({ receipt, onBack, onSubmit }: FinalConfirmProps) {
 
           <hr className="my-6 border-dashed border-line" />
 
-          <div className="flex flex-col gap-1.5">
-            {summary.itemDiscountTotal > 0 && (
+          {summary.itemDiscountTotal > 0 && (
+            <div className="mb-3">
               <Row label="値引合計" value={<span className="text-shu">−{yen(summary.itemDiscountTotal)}</span>} />
-            )}
-            <Row label={`明細合計（${taxLabel}・値引後）`} value={yen(summary.linesTotal)} />
-            {receipt.sd > 0 && <Row label="小計値引" value={`−${yen(receipt.sd)}`} />}
-            <Row label={receipt.inc ? "内消費税" : "消費税"} value={yen(summary.taxTotal)} />
-            <div className="mt-2">
-              <Row label="合計（税込）" value={yen(summary.total)} strong />
             </div>
-          </div>
+          )}
+          {receipt.fees.length > 0 && (
+            <div className="mb-4">
+              <FeeList fees={receipt.fees} />
+            </div>
+          )}
+          <TotalsCard netTotal={summary.netTotal} taxTotal={summary.taxTotal} total={summary.total} />
 
           <hr className="my-6 border-dashed border-line" />
 
@@ -72,7 +73,7 @@ export function FinalConfirm({ receipt, onBack, onSubmit }: FinalConfirmProps) {
             <h3 className="mb-1 text-base font-bold">税率別内訳</h3>
             {summary.rates.map((row) => (
               <div key={row.rate} className="flex flex-col gap-1.5">
-                <Row label={`${row.rate}%対象（${taxLabel}）`} value={yen(row.amount)} />
+                <Row label={`${row.rate}%対象（税抜）`} value={yen(row.amount)} />
                 <Row label="消費税額" value={yen(row.tax)} />
               </div>
             ))}
